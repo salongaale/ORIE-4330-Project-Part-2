@@ -142,14 +142,17 @@ class PrelimExamAssignment():
         ''''
         Add constraint to ensure each room r is only once
         ''''
-
+        for r in range(len(self.rooms)):
+            self.model.addConstr(sum(self.x.select('*',r)), GRB.LESS_EQUAL, 1)
         return
 
     def add_enrollment_const(self):
         ''''
         Add constraint to ensure each exam is given enough seats (only applies to in person)
         ''''
-
+        for i in range(len(self.exams)):
+            self.model.addConstr(sum(self.rooms["capacity"]*self.x[i,'*']), GRB.GREATER_EQUAL,
+            self.exams['enrollment'][i])
         return
 
     def set_objective(self):
@@ -160,7 +163,7 @@ class PrelimExamAssignment():
         # (1) total number of rooms used
         # (2) distance of rooms to academin org of class
         # (3) squared distances between rooms assigned to the same prelim
-
+        self.model.setObjective( self.rooms_used_weight* quicksum(self.z) + , GRB.MINIMIZE)
         self.model.update()
 
 
