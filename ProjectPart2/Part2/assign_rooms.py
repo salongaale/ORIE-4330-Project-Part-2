@@ -6,6 +6,7 @@ from gurobipy import *
 class PrelimExamAssignment():
 
     def __init__(self,
+                room_label_dict,
                  exams,
                  exam_dates,
                  rooms,
@@ -36,6 +37,7 @@ class PrelimExamAssignment():
         '''
 
         # save parameters
+        self.room_label_dict = room_label_dict
         self.exam_dates = exam_dates
         self.R = R
         self.wr = wr
@@ -87,16 +89,29 @@ class PrelimExamAssignment():
         Defines the decision variables
         '''
         # Define x(i,r) indicating if prelim i is assigned to room r
+        self.index_x = []
+        for i in self.exams['exam_id']:
+            for r in self.rooms['room_id']:
+                self.index_x.append((i,r))
 
-        self.x = self.model.addVars(,vtype=GRB.BINARY, name = "x")
+        self.x = self.model.addVars(self.index_x,vtype=GRB.BINARY, name = "x")
         # Define z(i) indicating the number of rooms prelim i is assigned to
-        self.z = self.model.addVars(,vtype=GRB.INTEGER, name = "z")
+        self.index_z = []
+        for i in self.exams['exam_id']:
+            self.index_z.append((i))
+        self.z = self.model.addVars(self.index_z,vtype=GRB.INTEGER, name = "z")
         # Define p(r,r') to indicate if room r and r' are assigned to the same prelim
         self.index_p = []
-        for r in self.rooms:
-            for r_prime in self.rooms:
-                self.index_p.extend((r,r_prime))
+        room_ids = self.rooms['room_id']
+        for i in range(len(self.rooms['room_id'])):
+            for j in range(i, len(self.rooms['room_id'])):
+
+                self.index_p.append((room_ids[i],room_ids[j]))
+
         self.p = self.model.addVars(self.index_p, vtype = GRB.BINARY, name = "p")
+        #print(self.index_x)
+        #print(self.index_z)
+        #print(self.index_p)
     def add_constraints(self):
         '''
         Function to add all the constraints
@@ -111,9 +126,9 @@ class PrelimExamAssignment():
         '''
         Add constraint to ensure z represents the number of classes a prelim is assigned to
         '''
-        for i in range(len(self.exams['exam_id'])):
+        for i in self.exams['exam_id']:
             #print(self.z.get(i))
-
+            #print(len(self.x.select(i,'*')))
             self.model.addConstr(sum(self.x.select(i,'*')), GRB.EQUAL, self.z[i], name = "c0")
         print('add_z_constraint')
 
@@ -123,55 +138,94 @@ class PrelimExamAssignment():
         ''''
         Add constraint to ensure p is 1 iff two rooms are assigned to the same prelim
         '''
-        for i in range(len(self.exams['exam_id'])):
-            for r in range(len(self.rooms['room_id'])):
-                for r_prime in range(len(self.rooms['room_id'])):
+        room_ids = self.rooms['room_id']
+        for i in self.exams['exam_id']:
+            for j in range(len(self.rooms['room_id'])):
+                r = self.rooms['room_id'][j]
+                for k in range(j, len(self.rooms['room_id'])):
+                    r_prime = self.rooms['room_id'][k]
                     self.model.addConstr(self.p[r,r_prime] >= self.x[i,r] + self.x[i,r_prime] - 1)
+        print('add_p_constraint')
         return
 
     def add_absolute_room_bound_constraint(self):
         ''''
         Add constraint to ensure a single prelim is assigned to at most R rooms
         '''
-        for i in range(len(self.exams['exam_id'])):
+        for i in self.exams['exam_id']:
             #print(self.z.select(i))
             self.model.addConstr(self.z[i]<= self.R)
+        print('add_absolute_room_bound_constraint')
         return
 
     def add_room_use_constraint(self):
         ''''
         Add constraint to ensure each room r is only once
-        ''''
-        for r in range(len(self.rooms)):
+        '''
+
+        for i in range(len(self.rooms['room_id'])):
+            r = self.rooms['room_id'][i]
             self.model.addConstr(sum(self.x.select('*',r)), GRB.LESS_EQUAL, 1)
+        print('add_room_use_constraint')
         return
 
     def add_enrollment_const(self):
         ''''
         Add constraint to ensure each exam is given enough seats (only applies to in person)
-        ''''
-        for i in range(len(self.exams)):
-            self.model.addConstr(sum(self.rooms["capacity"]*self.x[i,'*']), GRB.GREATER_EQUAL,
-            self.exams['enrollment'][i])
+        '''
+        exams = self.exams.reset_index(drop = True)
+        for idx,exam_i in enumerate(exams['exam_id']):
+                   self.model.addConstr(sum(self.rooms["s"])*sum(self.x.select(exam_i,'*')), GRB.GREATER_EQUAL,exams['n'][idx])
+        print('add_enrollment_const')
         return
 
     def set_objective(self):
         ''''
         Set the objective for the IP
-        ''''
+        '''
         # The objective has terms capturing
         # (1) total number of rooms used
         # (2) distance of rooms to academin org of class
         # (3) squared distances between rooms assigned to the same prelim
-        self.model.setObjective( self.rooms_used_weight* quicksum(self.z) + , GRB.MINIMIZE)
+        academic_org_dist = []
+        #second summation in the objective
+        for room in self.acadorg_dist.columns:
+            #get each distance from the room
+            for dist_aca in self.acadorg_dist[room]:
+                #get exam id
+                for i in self.exams['exam_id']:
+                    #map to room index
+                    room_id_list = self.room_label_dict[room]
+                    for true_id in room_id_list:
+                        #add constraint to list
+                        unit = self.x[i,true_id]*dist_aca*self.w_ac
+                        academic_org_dist.append(unit)
+
+        squared_dist_constraint = []
+        for r in self.dist.columns:
+            for distance in self.dist[r]:
+                room_id_list = self.room_label_dict[r]
+                for r_true_id in room_id_list:
+                    unit = (distance**2)*sum(self.p.select(r_true_id ,'*'))
+                    squared_dist_constraint.append(unit)
+
+        self.model.setObjective(self.wr*quicksum(self.z) , GRB.MINIMIZE)
         self.model.update()
 
 
     def solve(self):
         ''''
         Function to solve the IP problem
-        ''''
+        '''
         # Solve the model
         self.model.optimize()
+        obj = self.model.getObjective()
 
-        return
+        print(self.exams.columns)
+        x_vars_with_value_1 = []
+        for result in (self.x):
+            if 'value 1.0' in str(self.x[result]):
+                x_vars_with_value_1.append(result)
+
+
+        return x_vars_with_value_1
