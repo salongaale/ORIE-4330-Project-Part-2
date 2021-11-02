@@ -104,7 +104,7 @@ class PrelimExamAssignment():
         self.index_p = []
         room_ids = self.rooms['room_id']
         for i in range(len(self.rooms['room_id'])):
-            for j in range(i, len(self.rooms['room_id'])):
+            for j in range(len(self.rooms['room_id'])):
 
                 self.index_p.append((room_ids[i],room_ids[j]))
 
@@ -142,7 +142,7 @@ class PrelimExamAssignment():
         for i in self.exams['exam_id']:
             for j in range(len(self.rooms['room_id'])):
                 r = self.rooms['room_id'][j]
-                for k in range(j, len(self.rooms['room_id'])):
+                for k in range(len(self.rooms['room_id'])):
                     r_prime = self.rooms['room_id'][k]
                     self.model.addConstr(self.p[r,r_prime] >= self.x[i,r] + self.x[i,r_prime] - 1)
         print('add_p_constraint')
@@ -187,6 +187,7 @@ class PrelimExamAssignment():
         # (1) total number of rooms used
         # (2) distance of rooms to academin org of class
         # (3) squared distances between rooms assigned to the same prelim
+        
         academic_org_dist = []
         #second summation in the objective
         for room in self.acadorg_dist.columns:
@@ -209,7 +210,8 @@ class PrelimExamAssignment():
                     unit = (distance**2)*sum(self.p.select(r_true_id ,'*'))
                     squared_dist_constraint.append(unit)
 
-        self.model.setObjective(self.wr*quicksum(self.z) , GRB.MINIMIZE)
+        self.model.setObjective(self.wr*quicksum(self.z) + sum(squared_dist_constraint) + sum(academic_org_dist), GRB.MINIMIZE)
+       
         self.model.update()
 
 
@@ -219,13 +221,10 @@ class PrelimExamAssignment():
         '''
         # Solve the model
         self.model.optimize()
-        obj = self.model.getObjective()
-
-        print(self.exams.columns)
         x_vars_with_value_1 = []
-        for result in (self.x):
+
+        for result in self.x:
             if 'value 1.0' in str(self.x[result]):
                 x_vars_with_value_1.append(result)
-
 
         return x_vars_with_value_1
